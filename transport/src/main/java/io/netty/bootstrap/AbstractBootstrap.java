@@ -267,14 +267,18 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         validate();
         return doBind(ObjectUtil.checkNotNull(localAddress, "localAddress"));
     }
-
+    //真正完成 bind 工作的方法， 非常的关键
     private ChannelFuture doBind(final SocketAddress localAddress) {
+        //regFuture 它就是注册相关的promise对象，它关联的异步任务是 register0 这个任务
+        //register0 这个任务 咱们把它 扔到Channel 相关的eventLoop 工作队列了...
         final ChannelFuture regFuture = initAndRegister();
+        //channel->NioServerSocketChannel对象
         final Channel channel = regFuture.channel();
+
         if (regFuture.cause() != null) {
             return regFuture;
         }
-
+        // 当register0 已经被执行完后，regFuture 状态就是 done状态。
         if (regFuture.isDone()) {
             // At this point we know that the registration was complete and successful.
             ChannelPromise promise = channel.newPromise();
@@ -282,7 +286,11 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
             return promise;
         } else {
             // Registration future is almost always fulfilled already, but just in case it's not.
+            //promise是 与bind 操作相关的 promise对象 ...
             final PendingRegistrationPromise promise = new PendingRegistrationPromise(channel);
+
+            //这里向 register0 任务相关的 promise 对象添加一个 回调对象。 回调对象去处理 register0 成功或失败的事情...
+            // 监听回调线程 是eventLoop线程..不是当前主线程..
             regFuture.addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(ChannelFuture future) throws Exception {
@@ -300,14 +308,24 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
                     }
                 }
             });
+            // 主线程返回一个 与 bind 操作相关的 promise对象 ...
             return promise;
         }
     }
-
+    //ChannelFuture是Promise对象
     final ChannelFuture initAndRegister() {
         Channel channel = null;
         try {
+            //当前分析的是：服务端
+            //channelFactory 它是谁？ ReflectiveChannelFactory 实例。
+            //其实调用的是NioServerSocketChannel的无参构造方法。
+            //1.服务端Channel内部会创建出来 Pipeline
+            //2.Pipeline目前有两个处理器分别是head 和 tail
+            //3.配置Channel是非阻塞状态
+            //4.保存了感兴趣的事件类型为：Accept
+            //5.创建出来NioServerSocketChannel Unsafe对象，类型是NioMessageUnsafe
             channel = channelFactory.newChannel();
+            //记住 最主要的：这一步会给当前服务端 Channel 的Pipeline 添加一个 CI。
             init(channel);
         } catch (Throwable t) {
             if (channel != null) {
@@ -319,7 +337,33 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
             // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
             return new DefaultChannelPromise(new FailedChannel(), GlobalEventExecutor.INSTANCE).setFailure(t);
         }
+        //config() 返回什么呢？ServerBootstrapConfig(serverBootStrap)
+        //serverBootstrapConfig.group() 返回的就是boss组。 boss它是 NioEventLoopGroup
+        /**
+         register()->nioEventLoopGroup.register(channel) ->next().register(channel);
+                                                                ↓
+                                                                public EventLoop next() {
+                                                                    return (EventLoop) super.next();
+                                                                }
+                                                                ↓
+                                                                @Override
+                                                                public EventExecutor next() {
+                                                                   return chooser.next();
+                                                                }
+                                                                ↓ 情况一：chooser的构造，线程数不是偶数GenericEventExecutorChooser.next()效率低点
+                                                                ↓ 情况二：chooser的构造，线程数是偶数 PowerOfTwoEventExecutorChooser()效率高
+                                                                结果：分配到一个NioEventLoop
+          register()->nioEventLoopGroup.register(channel) ->next().register(channel);
+                                                                     ↓ 注册一个Promise对象
+                                                                     register(new DefaultChannelPromise(channel, this));
+                                                                     ↓ promise.channel().unsafe().register(this, promise)
+                                                                     NioMessageUnsafe.register(参数一，参数二)
+                                                                     ↓ 1：NioServerSocketChannel绑定EventLoop，
+                                                                     ↓ 2：将注册任务带着promise对象参数【regist0(promise)】提交到eventLoop的工作队列中
+                                                                     结果：返回与注册相关的promise对象
+        */
 
+        //regFuture 它就是注册相关的promise对象（future对象）
         ChannelFuture regFuture = config().group().register(channel);
         if (regFuture.cause() != null) {
             if (channel.isRegistered()) {
@@ -337,7 +381,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         //    i.e. It's safe to attempt bind() or connect() now:
         //         because bind() or connect() will be executed *after* the scheduled registration task is executed
         //         because register(), bind(), and connect() are all bound to the same thread.
-
+        //返回regFuture
         return regFuture;
     }
 
@@ -349,6 +393,8 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
 
         // This method is invoked before channelRegistered() is triggered.  Give user handlers a chance to set up
         // the pipeline in its channelRegistered() implementation.
+
+        //提交异步任务3
         channel.eventLoop().execute(new Runnable() {
             @Override
             public void run() {

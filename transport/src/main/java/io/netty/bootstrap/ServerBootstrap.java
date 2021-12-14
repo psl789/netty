@@ -40,7 +40,6 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * {@link Bootstrap} sub-class which allows easy bootstrap of {@link ServerChannel}
- *
  */
 public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerChannel> {
 
@@ -54,7 +53,8 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
     private volatile EventLoopGroup childGroup;
     private volatile ChannelHandler childHandler;
 
-    public ServerBootstrap() { }
+    public ServerBootstrap() {
+    }
 
     private ServerBootstrap(ServerBootstrap bootstrap) {
         super(bootstrap);
@@ -131,26 +131,51 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
     void init(Channel channel) {
         setChannelOptions(channel, newOptionsArray(), logger);
         setAttributes(channel, newAttributesArray());
-
+        // 获取到服务端 Pipeline管道
         ChannelPipeline p = channel.pipeline();
-
+        //其实这个就是 workerGroup
         final EventLoopGroup currentChildGroup = childGroup;
+        /**
+         * 这个是
+         * childHandler(new ChannelInitializer<SocketChannel>() {
+         *                  @Override
+         *                  public void initChannel(SocketChannel ch) throws Exception {
+         *                      ChannelPipeline p = ch.pipeline();
+         *                      if (sslCtx != null) {
+         *                          p.addLast(sslCtx.newHandler(ch.alloc()));
+         *                      }
+         *                      //p.addLast(new LoggingHandler(LogLevel.INFO));
+         *                      p.addLast(serverHandler);
+         *                  }
+         *              });
+         */
         final ChannelHandler currentChildHandler = childHandler;
+        //客户端Socket选项信息
         final Entry<ChannelOption<?>, Object>[] currentChildOptions = newOptionsArray(childOptions);
+        //Netty的Channel都是实现了 AttributeMap接口的，可以在启动类内置一些自定义数据，这样的话，创建出来的Channel实例，就包含这些数据了。
         final Entry<AttributeKey<?>, Object>[] currentChildAttrs = newAttributesArray(childAttrs);
 
+        //ChannelInitializer 它本身不是一个Handler，只是通过适配器实现了Handler接口。
+        //它存在的意义，就是为了延迟初始化Pipeline，至于什么时候初始化呢？当Pipeline上的Channel 激活以后，真正的添加handler 逻辑才要执行。
+        //目前知道咱们的 NioServerSocketChannel 内部的Pipeline长这个样子：head <--> CI <--> tail
+        //后面合适的时候 CI 会做解压缩操作，将真正内部的Handler添加到pipeline中，并且 将自己移除该pipeline。
         p.addLast(new ChannelInitializer<Channel>() {
             @Override
             public void initChannel(final Channel ch) {
                 final ChannelPipeline pipeline = ch.pipeline();
+                //.handler(new LoggingHandler(LogLevel.INFO))
                 ChannelHandler handler = config.handler();
                 if (handler != null) {
+                    // pipeline中添加与logic相关的handler
+                    // Pipeline[Head->logic->tail]
                     pipeline.addLast(handler);
                 }
 
-                ch.eventLoop().execute(new Runnable() {
+                ch.eventLoop().execute(new Runnable() { //异步任务2：pipeline中添加与连接相关的handler
                     @Override
                     public void run() {
+                        //pipeline中添加与连接相关的handler
+                        //Pipeline[Head->logic->accept->tail]
                         pipeline.addLast(new ServerBootstrapAcceptor(
                                 ch, currentChildGroup, currentChildHandler, currentChildOptions, currentChildAttrs));
                     }

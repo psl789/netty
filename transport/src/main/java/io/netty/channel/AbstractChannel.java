@@ -464,7 +464,10 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         @Override
         public final void register(EventLoop eventLoop, final ChannelPromise promise) {
             ObjectUtil.checkNotNull(eventLoop, "eventLoop");
+            //防止channel重复注册...
             if (isRegistered()) {
+                //1. 设置Promise结果为失败..
+                //2. 回调监听者，执行失败的逻辑..
                 promise.setFailure(new IllegalStateException("registered to an event loop already"));
                 return;
             }
@@ -473,13 +476,30 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                         new IllegalStateException("incompatible event loop type: " + eventLoop.getClass().getName()));
                 return;
             }
-
+            // AbstractChannel.this 获取到 Channel作用域，这个Channel就是unsafe的外层对象。
+            // AbstractChannel.this => NioServerSocketChannel对象..
+            // AbstractChannel.this.eventLoop = eventLoop->绑定关系.. 后续Channel上的 事件/任务 都会依赖当前EventLoop线程去处理。
             AbstractChannel.this.eventLoop = eventLoop;
-
+            /**
+             * eventLoop.inEventLoop() -> 判断当前线程 是不是 当前eventloop 自己 这个线程...
+             * 是-> 直接执行（比较特殊，因为我们 channel 支持 unregistor ...）
+             * 不是->将注册任务带着promise对象参数【regist0(promise)】提交到eventLoop的工作队列中
+             * 这样做目的：为了线程安全，单个线程去执行，不存在并发性。
+            */
             if (eventLoop.inEventLoop()) {
                 register0(promise);
             } else {
                 try {
+                    //将注册任务【regist0(promise)】带着promise对象参数，提交到eventLoop的工作队列中，
+                    /**eventLoop.execute
+                     * ↓ addTask(task);
+                     * ↓ !inEventLoop
+                     * startThread();
+                     * ↓ state == ST_NOT_STARTED && state(ST_NOT_STARTED)->state(ST_STARTED)
+                     * doStartThread();
+                     * ↓ 交给NioEventLoopGroup中的线程工厂创建线程去执行
+                     * threadFactory.newThread(command).start();
+                    */
                     eventLoop.execute(new Runnable() {
                         @Override
                         public void run() {
@@ -496,7 +516,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 }
             }
         }
-
+        //这个方法 一定是 当前Channel关联的EventLoop线程执行的
+        //参数：promise，表示注册结果，外部可以向它注册监听着....来完成注册后的逻辑....
         private void register0(ChannelPromise promise) {
             try {
                 // check if the channel is still open as it could be closed in the mean time when the register
@@ -505,18 +526,153 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     return;
                 }
                 boolean firstRegistration = neverRegistered;
+                //注册..（channel注册到jdk的selector，感兴趣事件0，附加参数NioServerSocketChannel/NioSocketChannel）
                 doRegister();
+
                 neverRegistered = false;
+                //表示当前Channel已经注册到 多路复用器了..
                 registered = true;
 
                 // Ensure we call handlerAdded(...) before we actually notify the promise. This is needed as the
                 // user may already fire events through the pipeline in the ChannelFutureListener.
+                /**
+                 * initRegister中的init的时候由于已经addLast(CI....)
+                 * pendingHandlerCallbackHead = Task[ctx[CI]]->Task[ctx[CI]]->Task[ctx[CI]]
+                 * 拆解CI       _________________
+                 *     pipeline|head<=>CI<=>tail|
+                 *             ˉˉˉˉˉˉˉˉˉˉˉˉˉˉˉˉˉˉ
+                 *        流程 pipeline.invokeHandlerAddedIfNeeded();
+                 *             ↓ firstRegistration=true
+                 *             callHandlerAddedForAllHandlers();
+                 *             ↓
+                 *             PendingHandlerCallback task = pendingHandlerCallbackHead;
+                 *             while (task != null) {
+                 *                task.execute();
+                 *                task = task.next;
+                 *             }
+                 *             ↓task.execute()= （PendingHandlerAddedTask实例）PendingHandlerAddedTask.execute()
+                 *             if (executor.inEventLoop()) {
+                 *                callHandlerAdded0(ctx);
+                 *             }
+                 *             ↓由于本线程是NioEventLoop执行的执行
+                 *             callHandlerAdded0(ctx);
+                 *             ↓
+                 *             ctx.callHandlerAdded();
+                 *             ↓
+                 *             handler().handlerAdded(this);
+                 *             ↓ handler()=CI（ChannelInitializer类不是真正的handler由ChannelHandlerAdapter适配器适配）
+                 *             initChannel(ctx)，这里其实就是执行的是Init中的方法，将handler添加到pipeline中，提交异步任务2
+                                     *             p.addLast(new ChannelInitializer<Channel>() {
+                                     *             @Override
+                                     *             public void initChannel(final Channel ch) {
+                                     *                 final ChannelPipeline pipeline = ch.pipeline();
+                                     *                 //.handler(new LoggingHandler(LogLevel.INFO))
+                                     *                 ChannelHandler handler = config.handler();
+                                     *                 if (handler != null) {
+                                     *                     pipeline.addLast(handler);
+                                     *                 }
+                                     *
+                                     *                 ch.eventLoop().execute(new Runnable() {
+                                     *                     @Override
+                                     *                     public void run() {
+                                     *                         pipeline.addLast(new ServerBootstrapAcceptor(
+                                     *                                 ch, currentChildGroup, currentChildHandler, currentChildOptions, currentChildAttrs));
+                                     *                     }
+                                     *                 });
+                                     *             }
+                                     *         });
+                 *             ↓最终移除该handler
+                 *             removeState(ctx);
+                 *
+                 * */
+                //这步提交了异步任务二（pipeline中添加与连接相关的handler）
+                //todo 为什么说ChannelInitializer不是真正的handler
                 pipeline.invokeHandlerAddedIfNeeded();
-
+                //这一步会去回调 注册在promise上相关的那些Listener，比如"主线程"在regFuture上注册的监听者。
+                /**AbstractBootstrap->doBind()->regFuture.addListener(new ChannelFutureListener() {
+                                                //                @Override
+                                                //                public void operationComplete(ChannelFuture future) throws Exception {
+                                                //                    Throwable cause = future.cause();
+                                                //                    if (cause != null) {
+                                                //                        // Registration on the EventLoop failed so fail the ChannelPromise directly to not cause an
+                                                //                        // IllegalStateException once we try to access the EventLoop of the Channel.
+                                                //                        promise.setFailure(cause);
+                                                //                    } else {
+                                                //                        // Registration was successful, so set the correct executor to use.
+                                                //                        // See https://github.com/netty/netty/issues/2586
+                                                //                        promise.registered();
+                                                //
+                                                //                        doBind0(regFuture, channel, localAddress, promise);
+                                                //                    }
+                                                //                }
+                                                //            });
+                                                ↓
+                                                doBind0()
+                                                ↓ 提交异步任务3
+                                                channel.eventLoop().execute(new Runnable() {
+                                                    @Override
+                                                    public void run() {
+                                                        if (regFuture.isSuccess()) {
+                                                            channel.bind(localAddress, promise).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
+                                                        } else {
+                                                            promise.setFailure(regFuture.cause());
+                                                        }
+                                                    }
+                                                });
+                                                */
+                /**这里提交了异步任务三（做物理上的绑定端口，是out类型的操作，从tail最终到达head，中间的handler对bind不感兴趣）
+                 *  ↓
+                 *  AbstractUnsafe.bind()
+                 *  ↓
+                 *  完成端口绑定，向nioEvnetLoop里面提交异步任务4（向pipeline传递激活事件）
+                 *  ↓
+                 *  异步任务4
+                 *        invokeLater(new Runnable() {
+                 *            @Override
+                 *            public void run() {
+                 *                pipeline.fireChannelActive();
+                 *            }
+                 *        });
+                 *  ↓
+                 *  pipeline.fireChannelActive();是in类型的事件从head——>tail
+                 *   其实只有HeadContext实现了fireChannelActive()
+                 *      public void channelActive(ChannelHandlerContext ctx) {
+                 *             ctx.fireChannelActive();
+                 *             readIfIsAutoRead();
+                 *      }
+                 *  ↓
+                 *  readIfIsAutoRead();
+                 *      if (channel.config().isAutoRead()) {
+                 *          channel.read();
+                 *      }
+                 *  ↓read是out操作从tail->head
+                 *  HeadContext.read()
+                 *  ↓
+                 *  unsafe.beginRead()（unsafe==AbstractUnsafe）
+                 *  ↓
+                 *  调用beginRead()其实就是->AbstactNioChannel.beginRead()（NioServerSocketChannel）
+                 *  ↓ if ((interestOps & readInterestOp) == 0) {
+                 *  ↓   interestOp和readInterestOp是在initAndRegister中的channel = channelFactory.newChannel();这一步创建赋值的
+                 *          public NioServerSocketChannel(ServerSocketChannel channel) {
+                 *              super(null, channel, SelectionKey.OP_ACCEPT);
+                 *              config = new NioServerSocketChannelConfig(this, javaChannel().socket());
+                 *          }
+                 *  ↓
+                 *  selectionKey.interestOps(interestOps | readInterestOp);
+                 *  修改channel在selector上注册的感兴趣事件为accept.
+                 */
                 safeSetSuccess(promise);
+
+                // 向当前Channel的Pipeline 发起 注册完成事件，关注的Handler可以做一些事情。
                 pipeline.fireChannelRegistered();
                 // Only fire a channelActive if the channel has never been registered. This prevents firing
                 // multiple channel actives if the channel is deregistered and re-registered.
+
+
+                //channel->NioserverSocketChannel
+                //咱们在这一步的时候 完成绑定了吗？ 绑定操作 一定是当前EventLoop线程去做的，当前EventLoop线程在干嘛呢？在执行register0
+                //这一步的时候，绑定一定是没完成的！
+                //isActive()->false 表示不成立
                 if (isActive()) {
                     if (firstRegistration) {
                         pipeline.fireChannelActive();
@@ -535,7 +691,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 safeSetFailure(promise, t);
             }
         }
-
+        //bind方法是有由nioEventLoop去执行的
+        //总结：完成端口绑定，向nioEvnetLoop里面提交异步任务4（向pipeline传递激活事件）
         @Override
         public final void bind(final SocketAddress localAddress, final ChannelPromise promise) {
             assertEventLoop();
@@ -556,25 +713,36 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                         "is not bound to a wildcard address; binding to a non-wildcard " +
                         "address (" + localAddress + ") anyway as requested.");
             }
-
+            //什么情况下是isActive()呢？当绑定完成之后才是isActive
+            //在这一步还未完成绑定是false
             boolean wasActive = isActive();
             try {
+                /** 获取jdk层面的ServerSocketChannel，并且使用它完成真正的绑定工作
+                 *    ↓
+                 *  javaChannel().bind(localAddress, config.getBacklog());
+                 */
                 doBind(localAddress);
             } catch (Throwable t) {
                 safeSetFailure(promise, t);
                 closeIfClosed();
                 return;
             }
-
+            //条件一 !wasActive->true
+            //条件二 isActive()->true（因为上面已经完成绑定了）
             if (!wasActive && isActive()) {
+                //这里再次向 当前channel#NioEventLoop 工作队列提交 异步任务4
                 invokeLater(new Runnable() {
                     @Override
                     public void run() {
+                        //headContext 会响应active事件，如何处理的呢？
+                        //再次向当前的Channel的pipeline发起read事件。
+                        //read事件，就会修改channel在selector上注册的感兴趣事件为accept.
                         pipeline.fireChannelActive();
                     }
                 });
             }
-
+            // promise 这个表示的是绑定结果，谁在等着绑定结果呢？
+            // 咱们的启动线程，在该promise上执行的wait操作，所以这一步 绑定完成之后，会将主线程唤醒。
             safeSetSuccess(promise);
         }
 

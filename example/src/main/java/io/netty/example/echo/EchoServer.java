@@ -36,7 +36,7 @@ import io.netty.handler.ssl.util.SelfSignedCertificate;
 public final class EchoServer {
 
     static final boolean SSL = System.getProperty("ssl") != null;
-    static final int PORT = Integer.parseInt(System.getProperty("port", "8007"));
+    static final int PORT = Integer.parseInt(System.getProperty("port", "9000"));
 
     public static void main(String[] args) throws Exception {
         // Configure SSL.
@@ -71,6 +71,8 @@ public final class EchoServer {
              });
 
             // Start the server.
+            // b.bind(PORT) 这个方法 最终返回了一个 与 "绑定" 操作相关的 promise 对象。
+            // promise.sync() 会将主线程陷入到"挂起"状态，直到"绑定"操作完成后，才会被唤醒。
             ChannelFuture f = b.bind(PORT).sync();
 
             // Wait until the server socket is closed.

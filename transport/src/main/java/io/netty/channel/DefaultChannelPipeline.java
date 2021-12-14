@@ -208,6 +208,12 @@ public class DefaultChannelPipeline implements ChannelPipeline {
             // If the registered is false it means that the channel was not registered on an eventLoop yet.
             // In this case we add the context to the pipeline and add a task that will call
             // ChannelHandler.handlerAdded(...) once the channel is registered.
+
+            //  head
+            //  ↓
+            //  task[ctx[ci]]->task[ctx[ci]]->task[ctx[ci]]->
+            //  ↓
+            //  tail
             if (!registered) {
                 newCtx.setAddPending();
                 callHandlerCallbackLater(newCtx, true);
@@ -1116,7 +1122,11 @@ public class DefaultChannelPipeline implements ChannelPipeline {
             task = task.next;
         }
     }
-
+    //  head
+    //  ↓
+    //  task[ctx[ci]]->task[ctx[ci]]->task[ctx[ci]]
+    //  ↓
+    //  tail
     private void callHandlerCallbackLater(AbstractChannelHandlerContext ctx, boolean added) {
         assert !registered;
 
@@ -1331,6 +1341,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
         @Override
         public void bind(
                 ChannelHandlerContext ctx, SocketAddress localAddress, ChannelPromise promise) {
+            //NioMessageUnsafe.bind()
             unsafe.bind(localAddress, promise);
         }
 
