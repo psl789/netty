@@ -267,6 +267,31 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         validate();
         return doBind(ObjectUtil.checkNotNull(localAddress, "localAddress"));
     }
+
+    /**
+     * bind
+     * ↓
+     * doBind()
+     * ↓ register注册相关的promise对象
+     * ChannelFuture regFuture = initAndRegister()
+     * ↓ 与bind相关操作的promise对象
+     * PendingRegistrationPromise promise = new PendingRegistrationPromise(channel);
+     * ↓ 注册的promise添加回调，等待注册完成后回调绑定方法doBind0(regFuture, channel, localAddress, promise);
+     * regFuture.addListener(new ChannelFutureListener(){
+     *                      @Override
+     *                      public void operationComplete(ChannelFuture future) throws Exception {
+     *                          Throwable cause = future.cause();
+     *                          if (cause != null) {
+     *                              promise.setFailure(cause);
+     *                          } else {
+     *                              promise.registered();
+     *                              doBind0(regFuture, channel, localAddress, promise);
+     *                          }
+     *                      }})
+     * ↓
+     * 返回绑定的Promise对象
+     */
+
     //真正完成 bind 工作的方法， 非常的关键
     private ChannelFuture doBind(final SocketAddress localAddress) {
         //regFuture 它就是注册相关的promise对象，它关联的异步任务是 register0 这个任务
@@ -353,6 +378,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
                                                                 ↓ 情况一：chooser的构造，线程数不是偶数GenericEventExecutorChooser.next()效率低点
                                                                 ↓ 情况二：chooser的构造，线程数是偶数 PowerOfTwoEventExecutorChooser()效率高
                                                                 结果：分配到一个NioEventLoop
+
           register()->nioEventLoopGroup.register(channel) ->next().register(channel);
                                                                      ↓ 注册一个Promise对象
                                                                      register(new DefaultChannelPromise(channel, this));

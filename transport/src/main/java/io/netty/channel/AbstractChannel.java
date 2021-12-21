@@ -68,10 +68,24 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      * @param parent
      *        the parent of this channel. {@code null} if there's no parent.
      */
+    /**
+     * 总结：完善信息,记录父通道，创建id，unsafe对象，pipleline。
+     * 当类型是NioSocketChannel时，
+     * 1：记录parent
+     * 2：创建id
+     * 3：创建Unsafe对象（当类型是是NioSocketChannel）
+     * 4：创建pipeline
+     * @param parent
+     */
     protected AbstractChannel(Channel parent) {
         this.parent = parent;
         id = newId();
+
+        //当类型是：NioSocketChannel,它的Unsafe实例是谁？ NioByteUnsafe
         unsafe = newUnsafe();
+        //创建出来当前Channel内部的Pipeline管道
+        //创建出来的这个Pipeline内部有两个默认的处理器，分别是HeadContext 和TailContext
+        // head<--->tail
         pipeline = newChannelPipeline();
     }
 
@@ -461,6 +475,16 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             return remoteAddress0();
         }
 
+        /**
+         * 总结：
+         * 1：channel绑定EventLoop
+         * 2：向提交EventLoop提交register0任务
+         *
+         *
+         * 被执行：异步线程
+         * @param eventLoop
+         * @param promise
+         */
         @Override
         public final void register(EventLoop eventLoop, final ChannelPromise promise) {
             ObjectUtil.checkNotNull(eventLoop, "eventLoop");
@@ -585,7 +609,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                  *             removeState(ctx);
                  *
                  * */
-                //这步提交了异步任务二（pipeline中添加与连接相关的handler）
+                //拆解CI，这步提交了异步任务二（pipeline中添加与连接相关的handler）
                 //todo 为什么说ChannelInitializer不是真正的handler
                 pipeline.invokeHandlerAddedIfNeeded();
                 //这一步会去回调 注册在promise上相关的那些Listener，比如"主线程"在regFuture上注册的监听者。
@@ -650,7 +674,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                  *  ↓
                  *  unsafe.beginRead()（unsafe==AbstractUnsafe）
                  *  ↓
-                 *  调用beginRead()其实就是->AbstactNioChannel.beginRead()（NioServerSocketChannel）
+                 *  调用beginRead()其实就是->NioMessageUnSafe.beginRead()（
                  *  ↓ if ((interestOps & readInterestOp) == 0) {
                  *  ↓   interestOp和readInterestOp是在initAndRegister中的channel = channelFactory.newChannel();这一步创建赋值的
                  *          public NioServerSocketChannel(ServerSocketChannel channel) {

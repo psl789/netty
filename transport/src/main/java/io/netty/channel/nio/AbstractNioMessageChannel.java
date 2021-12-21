@@ -66,16 +66,23 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
         @Override
         public void read() {
             assert eventLoop().inEventLoop();
+            //服务端config对象
             final ChannelConfig config = config();
+            //服务端pipeline
             final ChannelPipeline pipeline = pipeline();
+            //控制读循环，以及预测下次创建的ByteBuf容量大小
             final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
+            //重置
             allocHandle.reset(config);
 
             boolean closed = false;
             Throwable exception = null;
             try {
                 try {
+                    //do...while 读消息循环....
                     do {
+                        //正常情况下localRead = 1
+                        //将netty封装的新创建的客户端channel加入readBuf，并返回1
                         int localRead = doReadMessages(readBuf);
                         if (localRead == 0) {
                             break;
@@ -84,25 +91,32 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                             closed = true;
                             break;
                         }
-
+                        //更新已读消息数量
                         allocHandle.incMessagesRead(localRead);
                     } while (continueReading(allocHandle));
                 } catch (Throwable t) {
                     exception = t;
                 }
-
+                //执行到这里 readBuf里放的全都是客户端channel对象
                 int size = readBuf.size();
+
                 for (int i = 0; i < size; i ++) {
                     readPending = false;
+                    // 向服务端通道 传播 每个 客户端Channel 对象。
+                    //HeadContext<->ServerBootStrapAcceptContext<->TailContext
+
                     pipeline.fireChannelRead(readBuf.get(i));
                 }
+                //清空...
                 readBuf.clear();
+                //回头聊
                 allocHandle.readComplete();
+
+                // 重新设置 selector 上当前Server Key，让key包含accept，其实就是让selector 继续监听 accept类型事件。
                 pipeline.fireChannelReadComplete();
 
                 if (exception != null) {
                     closed = closeOnReadError(exception);
-
                     pipeline.fireExceptionCaught(exception);
                 }
 

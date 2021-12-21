@@ -76,9 +76,20 @@ public abstract class AbstractNioChannel extends AbstractChannel {
      * @param ch                the underlying {@link SelectableChannel} on which it operates
      * @param readInterestOp    the ops to set to receive data from the {@link SelectableChannel}
      */
+    /**
+     * 总结： 保存信息，并且进一步完善通道信息。
+     *  1：完善信息,记录父通道，创建id，unsafe对象，pipleline。
+     *  2：记录通道，记录感兴趣事件
+     * @param parent
+     * @param ch
+     * @param readInterestOp
+     */
     protected AbstractNioChannel(Channel parent, SelectableChannel ch, int readInterestOp) {
+        //1：完善信息,记录父通道，创建id，unsafe对象，pipleline。
         super(parent);
+        //2：记录通道
         this.ch = ch;
+        //3：记录感兴趣事件
         this.readInterestOp = readInterestOp;
         try {
             ch.configureBlocking(false);
@@ -419,7 +430,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             //修改channel注册的事件
             //selector(ch,0,attr)
             //↓
-            //selector(ch,readInterestOp,attr)
+            //selector(ch,accept,attr)
             selectionKey.interestOps(interestOps | readInterestOp);
         }
     }

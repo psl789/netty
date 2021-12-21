@@ -101,7 +101,17 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
      * @param parent    the {@link Channel} which created this instance or {@code null} if it was created by the user
      * @param socket    the {@link SocketChannel} which will be used
      */
+    /**
+     * 总结： 创建客户端
+     * @param parent
+     * @param socket
+     */
     public NioSocketChannel(Channel parent, SocketChannel socket) {
+        /**
+         * （1）保存信息，并且进一步完善通道信息。
+         *      1.1：完善信息,记录父通道，创建id，unsafe对象，pipleline。
+         *      1.2：记录通道，记录感兴趣事件
+         */
         super(parent, socket);
         config = new NioSocketChannelConfig(this, socket.socket());
     }
