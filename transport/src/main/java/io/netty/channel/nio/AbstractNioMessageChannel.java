@@ -104,7 +104,6 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                     readPending = false;
                     // 向服务端通道 传播 每个 客户端Channel 对象。
                     //HeadContext<->ServerBootStrapAcceptContext<->TailContext
-
                     pipeline.fireChannelRead(readBuf.get(i));
                 }
                 //清空...

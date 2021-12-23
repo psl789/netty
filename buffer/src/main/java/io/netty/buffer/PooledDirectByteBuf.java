@@ -45,6 +45,7 @@ final class PooledDirectByteBuf extends PooledByteBuf<ByteBuffer> {
         super(recyclerHandle, maxCapacity);
     }
 
+    //复制内存，举例：A对应一块内存，又复制A2对应同一块内存
     @Override
     protected ByteBuffer newInternalNioBuffer(ByteBuffer memory) {
         return memory.duplicate();

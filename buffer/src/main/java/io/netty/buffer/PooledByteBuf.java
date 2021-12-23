@@ -153,6 +153,7 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
     protected final ByteBuffer internalNioBuffer() {
         ByteBuffer tmpNioBuf = this.tmpNioBuf;
         if (tmpNioBuf == null) {
+            //复制内存，举例：A对应一块内存，又复制A2对应同一块内存
             this.tmpNioBuf = tmpNioBuf = newInternalNioBuffer(memory);
         } else {
             tmpNioBuf.clear();
@@ -185,7 +186,9 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
 
     final ByteBuffer _internalNioBuffer(int index, int length, boolean duplicate) {
         index = idx(index);
+        //得到一块复制内存
         ByteBuffer buffer = duplicate ? newInternalNioBuffer(memory) : internalNioBuffer();
+        //拿到对应位置的内存
         buffer.limit(index + length).position(index);
         return buffer;
     }
@@ -198,6 +201,7 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
     @Override
     public final ByteBuffer internalNioBuffer(int index, int length) {
         checkIndex(index, length);
+        //拿到对应位置的内存
         return _internalNioBuffer(index, length, false);
     }
 
@@ -250,6 +254,7 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
     @Override
     public final int setBytes(int index, ScatteringByteChannel in, int length) throws IOException {
         try {
+            //拿到对应位置的内存，将channel中的数据一点点读到ByteBuf中
             return in.read(internalNioBuffer(index, length));
         } catch (ClosedChannelException ignored) {
             return -1;

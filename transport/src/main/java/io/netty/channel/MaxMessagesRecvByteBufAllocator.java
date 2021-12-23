@@ -24,12 +24,14 @@ public interface MaxMessagesRecvByteBufAllocator extends RecvByteBufAllocator {
      * Returns the maximum number of messages to read per read loop.
      * a {@link ChannelInboundHandler#channelRead(ChannelHandlerContext, Object) channelRead()} event.
      * If this value is greater than 1, an event loop might attempt to read multiple times to procure multiple messages.
+     * 获取 每次读循环操作 最大能读取的消息数量，每次ch内拉一次数据 称为一个消息
      */
     int maxMessagesPerRead();
 
     /**
      * Sets the maximum number of messages to read per read loop.
      * If this value is greater than 1, an event loop might attempt to read multiple times to procure multiple messages.
+     * 设置 每次读循环操作 最大能读取的消息数量
      */
     MaxMessagesRecvByteBufAllocator maxMessagesPerRead(int maxMessagesPerRead);
 }
