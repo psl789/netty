@@ -441,7 +441,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      * {@link Unsafe} implementation which sub-classes must extend and use.
      */
     protected abstract class AbstractUnsafe implements Unsafe {
-
+        //每个Channel 都有一个属于它自己的 unsafe，每个unsafe都有一个属于它自己的 outboundBuffer。
         private volatile ChannelOutboundBuffer outboundBuffer = new ChannelOutboundBuffer(AbstractChannel.this);
         private RecvByteBufAllocator.Handle recvHandle;
         private boolean inFlush0;
@@ -478,7 +478,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         /**
          * 总结：
          * 1：channel绑定EventLoop
-         * 2：向提交EventLoop提交register0任务
+         * 2：向提交EventLoop提交register0异步任务
          *
          *
          * 被执行：异步线程
@@ -540,6 +540,10 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 }
             }
         }
+        //目的：
+            // 1：完成channel在selector上的0事件注册，
+            // 2：拆解CI，告知pipeline，ch已经注册成功了，移除CI这个ctx
+            // 3：修改channel在selector为构造channel时的事件
         //这个方法 一定是 当前Channel关联的EventLoop线程执行的
         //参数：promise，表示注册结果，外部可以向它注册监听着....来完成注册后的逻辑....
         private void register0(ChannelPromise promise) {
@@ -1053,6 +1057,10 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
         }
 
+        /**
+         * @param msg    一般都是ByteBuf对象，当然有其他情况 比如说FileRegion... 不考虑这种情况..
+         * @param promise 业务如果关注 本次 写操作是否成功 或者失败，可以手动提交一个跟msg相关的promise，promise 内可以注册一些监听者，用于处理结果。
+         */
         @Override
         public final void write(Object msg, ChannelPromise promise) {
             assertEventLoop();
@@ -1072,10 +1080,13 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 }
                 return;
             }
-
+            //表示 msg 数据大小
             int size;
             try {
+                //msg 一般都是ByteBuf对象
+                //ByteBuf 类型 是 heap类型的话，这里会将它转换为direct类型。
                 msg = filterOutboundMessage(msg);
+                // 获取当前消息，有效数据量大小
                 size = pipeline.estimatorHandle().size(msg);
                 if (size < 0) {
                     size = 0;
@@ -1088,7 +1099,10 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 }
                 return;
             }
-
+            //将 ByteBuf数据 加入 到 出站缓冲区内。
+            //参数1：msg，ByteBuf 对象，并且这个ByteBuf管理的内存归属是direct
+            //参数2：size，数据量大小
+            //参数3：promise，业务如果关注 本次 写操作是否成功 或者失败，可以手动提交一个跟msg相关的promise，promise 内可以注册一些监听者，用于处理结果。
             outboundBuffer.addMessage(msg, size, promise);
         }
 

@@ -147,18 +147,44 @@ public class DefaultChannelPipeline implements ChannelPipeline {
         return channel;
     }
 
+    /**
+     * @param name     handler名称，一般是null
+     * @param handler  业务层面的处理器
+     * @return
+     */
     @Override
     public final ChannelPipeline addFirst(String name, ChannelHandler handler) {
+        /**
+         * EventExecutorGroup 事件执行器组
+         * name     handler名称，一般是null
+         * handler  业务层面的处理器
+         */
         return addFirst(null, name, handler);
     }
 
+    /**
+     *
+     * @param group    事件执行器组， 一般情况下  是 null。
+     * @param name     一般是null
+     * @param handler  handler，业务层面的处理器
+     *
+     * @return
+     */
     @Override
     public final ChannelPipeline addFirst(EventExecutorGroup group, String name, ChannelHandler handler) {
+
+        //桥梁ctx
         final AbstractChannelHandlerContext newCtx;
+
         synchronized (this) {
+            //设置added属性为true，表示 handler 已经插入到 某个 Pipeline了
             checkMultiplicity(handler);
             name = filterName(name, handler);
-
+            /**
+             * 参数1：group->EventExecutorGroup事件执行器组， 一般情况下  是 null。
+             * 参数2：filterName(name, handler) 给当前ctx生成的名字
+             * 参数3：ctx 需要包装的真实handler
+             */
             newCtx = newContext(group, name, handler);
 
             addFirst0(newCtx);
@@ -197,12 +223,18 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
     @Override
     public final ChannelPipeline addLast(EventExecutorGroup group, String name, ChannelHandler handler) {
+        //桥梁ctx
         final AbstractChannelHandlerContext newCtx;
         synchronized (this) {
+            //设置added属性为true，表示 handler 已经插入到 某个 Pipeline了
             checkMultiplicity(handler);
-
+            /**
+             * 参数1：group->EventExecutorGroup事件执行器组， 一般情况下  是 null。
+             * 参数2：filterName(name, handler) 给当前ctx生成的名字
+             * 参数3：ctx 需要包装的真实handler
+             */
             newCtx = newContext(group, filterName(name, handler), handler);
-
+            // 真正的加入Pipeline中，插入的位置  为tail节点之前的一个位置
             addLast0(newCtx);
 
             // If the registered is false it means that the channel was not registered on an eventLoop yet.
@@ -214,12 +246,20 @@ public class DefaultChannelPipeline implements ChannelPipeline {
             //  task[ctx[ci]]->task[ctx[ci]]->task[ctx[ci]]->
             //  ↓
             //  tail
+            //!registered->true 说明Pipeline归属的CH尚未注册，还未分配NioEventLoop...
             if (!registered) {
+                //添加一个任务，等CH注册完成后，再去执行..
+                //为什么，这么设计？
+                //主要因为 ChannelHandler 有 handlerAdded handlerRemove . 这俩方法传递了一个 ctx。
+                //通过ctx 可以拿到 executor， 如果ch没注册..那么ch就没有executor，那么handler.handlerAdded 拿到 executor 可能是null
+                //null的情况，再提交任务，空指针异常
                 newCtx.setAddPending();
+                //参数1：newCtx 当前ctx。
+                //参数2：true，添加相关的操作。
                 callHandlerCallbackLater(newCtx, true);
                 return this;
             }
-
+            //执行到这里，说明添加handler的时候，ch已经完成了注册
             EventExecutor executor = newCtx.executor();
             if (!executor.inEventLoop()) {
                 callHandlerAddedInEventLoop(newCtx, executor);
@@ -389,7 +429,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
         return this;
     }
-
+    //生成一个name，规则：handlerType + "#"+编号
     private String generateName(ChannelHandler handler) {
         Map<Class<?>, String> cache = nameCaches.get();
         Class<?> handlerType = handler.getClass();
@@ -420,6 +460,9 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
     @Override
     public final ChannelPipeline remove(ChannelHandler handler) {
+        //(getContextOrDie(handler))根据handler 获取到 包装该handler的ctx
+
+        //remove掉ctx
         remove(getContextOrDie(handler));
         return this;
     }
@@ -459,6 +502,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
         assert ctx != head && ctx != tail;
 
         synchronized (this) {
+            // 从双向链表 中 拆除。
             atomicRemoveFromHandlerList(ctx);
 
             // If the registered is false it means that the channel was not registered on an eventloop yet.
@@ -878,7 +922,9 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
             final EventExecutor executor = ctx.executor();
             if (inEventLoop || executor.inEventLoop(currentThread)) {
+                // 从双向链表移除
                 atomicRemoveFromHandlerList(ctx);
+                // 调用handler handlerRemoved 方法，可以释放资源等操作
                 callHandlerRemoved0(ctx);
             } else {
                 final AbstractChannelHandlerContext finalCtx = ctx;
@@ -1122,11 +1168,21 @@ public class DefaultChannelPipeline implements ChannelPipeline {
             task = task.next;
         }
     }
-    //  head
-    //  ↓
-    //  task[ctx[ci]]->task[ctx[ci]]->task[ctx[ci]]
-    //  ↓
-    //  tail
+    /**
+     *情况一
+     * head
+     * ↓
+     * task[ctx[ci]]->task[ctx[ci]]->task[ctx[ci]]
+     * ↓
+     * tail
+     *
+     * 情况二
+     * head
+     * ↓
+     * null -> new Task[ctx[ci]]
+     * ↓
+     * tail
+    */
     private void callHandlerCallbackLater(AbstractChannelHandlerContext ctx, boolean added) {
         assert !registered;
 
@@ -1373,8 +1429,19 @@ public class DefaultChannelPipeline implements ChannelPipeline {
             unsafe.beginRead();
         }
 
+        /**
+         *
+         * @param ctx    当前HeadContext本身
+         * @param msg    一般都是ByteBuf对象，当然有其他情况 比如说FileRegion... 不考虑这种情况..
+         * @param promise 业务如果关注 本次 写操作是否成功 或者失败，可以手动提交一个跟msg相关的promise，promise 内可以注册一些监听者，用于处理结果。
+         */
         @Override
         public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
+            //unsafe 对象： NioSocketChannelUnsafe
+            /**
+             * @param msg    一般都是ByteBuf对象，当然有其他情况 比如说FileRegion... 不考虑这种情况..
+             * @param promise 业务如果关注 本次 写操作是否成功 或者失败，可以手动提交一个跟msg相关的promise，promise 内可以注册一些监听者，用于处理结果。
+             */
             unsafe.write(msg, promise);
         }
 

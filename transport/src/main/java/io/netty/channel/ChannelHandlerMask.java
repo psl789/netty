@@ -88,6 +88,13 @@ final class ChannelHandlerMask {
     /**
      * Calculate the {@code executionMask}.
      */
+    /**
+     *
+     * @param handlerType handler的真实class类型
+     * @return 返回值： int类型的数，但是需要看它的二进制值。
+     * 二进制中对应的下标的位，代表指定的 方法，位的值是1 说明 方法在handlerType 类型中 进行了实现
+     *                                       位的值是0 说明 方法在handlerType 类型中 未进行实现
+     */
     private static int mask0(Class<? extends ChannelHandler> handlerType) {
         int mask = MASK_EXCEPTION_CAUGHT;
         try {

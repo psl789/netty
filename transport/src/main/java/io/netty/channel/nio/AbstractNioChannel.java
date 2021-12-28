@@ -450,18 +450,27 @@ public abstract class AbstractNioChannel extends AbstractChannel {
      * Note that this method does not create an off-heap copy if the allocation / deallocation cost is too high,
      * but just returns the original {@link ByteBuf}..
      */
+    //总结：堆内内存->堆外内存
     protected final ByteBuf newDirectBuffer(ByteBuf buf) {
+        //获取当前ByteBuf可读数据量
         final int readableBytes = buf.readableBytes();
+
         if (readableBytes == 0) {
             ReferenceCountUtil.safeRelease(buf);
             return Unpooled.EMPTY_BUFFER;
         }
-
+        //执行到这里，说明byteBuf 内还是有 有效数据的。
+        //alloc 是一个内存分配器 PooledByteBufAllocator
         final ByteBufAllocator alloc = alloc();
+        //正常情况，该条件都会成立。
         if (alloc.isDirectBufferPooled()) {
+            //根据可读数据量，使用内存分配器，分配了一块指定大小的堆外内存 ByteBuf对象。
             ByteBuf directBuf = alloc.directBuffer(readableBytes);
+            // 将堆内 ByteBuf数据 拷贝到 堆外ByteBuf对象。
             directBuf.writeBytes(buf, buf.readerIndex(), readableBytes);
+            // 释放堆内 ByteBuf 占用的内存。
             ReferenceCountUtil.safeRelease(buf);
+            // 返回 堆外 ByteBuf对象
             return directBuf;
         }
 

@@ -61,7 +61,9 @@ import static io.netty.channel.ChannelHandlerMask.mask;
 abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, ResourceLeakHint {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(AbstractChannelHandlerContext.class);
+    //后驱
     volatile AbstractChannelHandlerContext next;
+    //前驱
     volatile AbstractChannelHandlerContext prev;
 
     private static final AtomicIntegerFieldUpdater<AbstractChannelHandlerContext> HANDLER_STATE_UPDATER =
@@ -84,9 +86,11 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
      * nor {@link ChannelHandler#handlerRemoved(ChannelHandlerContext)} was called.
      */
     private static final int INIT = 0;
-
+    //当前ctx 归属的pipeline
     private final DefaultChannelPipeline pipeline;
+    // 默认情况下 不指定，向Pipeline 添加CTX时，Pipeline会给Ctx 自动生成name。
     private final String name;
+
     private final boolean ordered;
     private final int executionMask;
 
@@ -106,6 +110,8 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         this.name = ObjectUtil.checkNotNull(name, "name");
         this.pipeline = pipeline;
         this.executor = executor;
+        //参数：handlerClass handler的真实class类型
+        //mask方法用于计算一个掩码，这个掩码的作用是方便ctx前后传递时 查找 合适的 下一个ctx。
         this.executionMask = mask(handlerClass);
         // Its ordered if its driven by the EventLoop or the given Executor is an instanceof OrderedEventExecutor.
         ordered = executor == null || executor instanceof OrderedEventExecutor;
@@ -126,6 +132,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         return channel().config().getAllocator();
     }
 
+    //一般情况 返回 ch 注册的 事件轮询器
     @Override
     public EventExecutor executor() {
         if (executor == null) {
@@ -142,6 +149,8 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
 
     @Override
     public ChannelHandlerContext fireChannelRegistered() {
+        //MASK_CHANNEL_REGISTERED 常量值
+        // findContextInbound 方法会找到 当前ctx后面 ctx中 实现了 CHANNEL_REGISTERED 方法 的ctx， 其实是ctx 中 的 handler 实现。
         invokeChannelRegistered(findContextInbound(MASK_CHANNEL_REGISTERED));
         return this;
     }
@@ -161,6 +170,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     }
 
     private void invokeChannelRegistered() {
+        //是ADD_COMPELETE状态才可以调用
         if (invokeHandler()) {
             try {
                 ((ChannelInboundHandler) handler()).channelRegistered(this);
@@ -878,6 +888,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         EventExecutor currentExecutor = executor();
         do {
             ctx = ctx.next;
+            //查看ctx有没有实现mask值对应功能
         } while (skipContext(ctx, currentExecutor, mask, MASK_ONLY_INBOUND));
         return ctx;
     }
@@ -890,7 +901,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         } while (skipContext(ctx, currentExecutor, mask, MASK_ONLY_OUTBOUND));
         return ctx;
     }
-
+    //根据executionMask查对应mask的值，查询是否为0/1 对应了ctx重载的xxx方法
     private static boolean skipContext(
             AbstractChannelHandlerContext ctx, EventExecutor currentExecutor, int mask, int onlyMask) {
         // Ensure we correctly handle MASK_EXCEPTION_CAUGHT which is not included in the MASK_EXCEPTION_CAUGHT
@@ -899,6 +910,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
                 // everything to preserve ordering.
                 //
                 // See https://github.com/netty/netty/issues/10067
+                //查询是否实现了mask值对应的功能
                 (ctx.executor() == currentExecutor && (ctx.executionMask & mask) == 0);
     }
 

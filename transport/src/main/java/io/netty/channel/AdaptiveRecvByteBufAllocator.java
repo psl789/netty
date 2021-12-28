@@ -138,22 +138,31 @@ public class AdaptiveRecvByteBufAllocator extends DefaultMaxMessagesRecvByteBufA
             return nextReceiveBufferSize;
         }
 
+        //actualReadBytes：真实读取的数据量，本次从ch内读取的数据量
         private void record(int actualReadBytes) {
+            //举个例子：
+            //假设 SIZE_TABLE[idx] = 512 => SIZE_TABLE[idx-1] = 496
+            //如果本次读取的数据量<=496,说明ch的缓冲区数据 不是很多，可能就不需要那么的ByteBuf
+            //如果第二次读取的数据量<=496,说明ch的缓冲区数据不是很多，不需要那么大的ByteBuf
             if (actualReadBytes <= SIZE_TABLE[max(0, index - INDEX_DECREMENT)]) {
                 if (decreaseNow) {
+                    //初始阶段 定义过：最小 不能 小于 TABLE_SIZE[minIndex]
                     index = max(index - INDEX_DECREMENT, minIndex);
+                    //获取相对减小的BufferSize值，赋值给nextReceiveBufferSize
                     nextReceiveBufferSize = SIZE_TABLE[index];
                     decreaseNow = false;
                 } else {
+                    //设置成true
                     decreaseNow = true;
-                }
+                }//条件成立：说明本次 ch 请求，已经将 ByteBuf 容器装满了.. 说明ch内可能还有很多数据..需要装，所以让index右移一位，
+                // 获取出来一个更大的nextReceiveBufferSize，构建更大的ByteBuf对象
             } else if (actualReadBytes >= nextReceiveBufferSize) {
                 index = min(index + INDEX_INCREMENT, maxIndex);
                 nextReceiveBufferSize = SIZE_TABLE[index];
                 decreaseNow = false;
             }
         }
-
+        //挑出最合适 当前已经读的消息size总大小的ByteBuf容器
         @Override
         public void readComplete() {
             record(totalBytesRead());

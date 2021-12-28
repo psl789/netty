@@ -78,6 +78,24 @@ public final class ChannelOutboundBuffer {
     // The Entry that is the first in the linked-list structure that was flushed
     private Entry flushedEntry;
     // The Entry which is the first unflushed in the linked-list structure
+    //使用unflush指向第一条数据，tailEntry指向第一条
+    //当又收到一条数据后，tailEntry指向第二条。
+    /**
+     * unflushedEntry
+     *          ↓
+     *          entry
+     *          ↑
+     *          tailEntry
+     *
+     *
+     * unflushedEntry
+     *             ↓
+     *             entry1-> entry2
+     *                       ↑
+     *                       tailEntry
+     *
+     *   调用ctx.write(msg)->handlerContext->Unsafe->(ChannelOutboundBuffer)出站缓冲区
+     */
     private Entry unflushedEntry;
     // The Entry which represents the tail of the buffer
     private Entry tailEntry;
