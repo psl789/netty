@@ -95,6 +95,8 @@ public final class ChannelOutboundBuffer {
      *                       tailEntry
      *
      *   调用ctx.write(msg)->handlerContext->Unsafe->(ChannelOutboundBuffer)出站缓冲区
+     *
+     *   addFlush
      */
     private Entry unflushedEntry;
     // The Entry which represents the tail of the buffer
