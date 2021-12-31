@@ -1060,6 +1060,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         /**
          * @param msg    一般都是ByteBuf对象，当然有其他情况 比如说FileRegion... 不考虑这种情况..
          * @param promise 业务如果关注 本次 写操作是否成功 或者失败，可以手动提交一个跟msg相关的promise，promise 内可以注册一些监听者，用于处理结果。
+         *    总结：
+         *        1：将 ByteBuf数据 加入 到 出站缓冲区内。并赋值unflushedEntry和tailEntry
          */
         @Override
         public final void write(Object msg, ChannelPromise promise) {
@@ -1099,7 +1101,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 }
                 return;
             }
-            //将 ByteBuf数据 加入 到 出站缓冲区内。
+            //将 ByteBuf数据 加入 到 出站缓冲区内。并赋值unflushedEntry和tailEntry
             //参数1：msg，ByteBuf 对象，并且这个ByteBuf管理的内存归属是direct
             //参数2：size，数据量大小
             //参数3：promise，业务如果关注 本次 写操作是否成功 或者失败，可以手动提交一个跟msg相关的promise，promise 内可以注册一些监听者，用于处理结果。
@@ -1114,8 +1116,11 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             if (outboundBuffer == null) {
                 return;
             }
-
+            //预准备刷新工作
+            //将flushedEntry 指向第一个需要刷新的entry节点
+            //计算出flushedEntry----> tailEntry 总共有多少entry需要被刷新，值记录在flushed字段内。
             outboundBuffer.addFlush();
+            //真正刷新的工作
             flush0();
         }
 
@@ -1152,6 +1157,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
 
             try {
+                //正常逻辑，执行到这里。
+                //参数：当前ch的出站缓冲区
                 doWrite(outboundBuffer);
             } catch (Throwable t) {
                 handleWriteError(t);
