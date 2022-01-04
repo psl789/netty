@@ -390,6 +390,16 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
         }
     }
     //参数：当前ch的出站缓冲区
+
+    /**
+     * 1: 将出站缓冲区中的消息msg（byteBuff）->byteBuffer
+     * 2: 将转化得到得byteBuffer写入到缓冲区中
+     * 3: 将写入到socket缓冲区的字节从出站缓冲区中移除（其实flushedEntry位置更新了）
+     * 总结：将数据写入到socket缓冲区
+     *
+     * @param in
+     * @throws Exception
+     */
     @Override
     protected void doWrite(ChannelOutboundBuffer in) throws Exception {
         //获取当前Netty ch包装的JDK层面的channel 对象

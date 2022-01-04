@@ -94,10 +94,18 @@ abstract class SizeClasses implements SizeClassesMetric {
     private static final int LOG2_DELTA_LOOKUP_IDX = 6;
 
     private static final byte no = 0, yes = 1;
-
+    //参数1：allocator对象
+    //参数2：pageSize，8K
+    //参数3：maxOrder，11
+    //参数4：pageShifts，13  1<< 13 => PageSize
+    //参数5： chunkSize，16mb
+    //参数6：directMemoryCacheAlignment 0
     protected SizeClasses(int pageSize, int pageShifts, int chunkSize, int directMemoryCacheAlignment) {
+        //8k
         this.pageSize = pageSize;
+        // 13,1<<13=>PageSize
         this.pageShifts = pageShifts;
+        //16mb
         this.chunkSize = chunkSize;
         this.directMemoryCacheAlignment = directMemoryCacheAlignment;
 
